@@ -41,18 +41,9 @@ Paste a repo → GitVerse builds a visual map + AI onboarding so contributors ca
 - Ask AI questions about files, folders, and architecture
 - Generate analysis jobs and track progress
 
-## Getting Started
+## Supported Node Version
 
-The canonical onboarding and setup guide is:
-
-- [GETTING_STARTED.md](./GETTING_STARTED.md)
-
-Additional setup docs:
-
-- [START_HERE.md](./START_HERE.md)
-- [GOOGLE_OAUTH_SETUP.md](./GOOGLE_OAUTH_SETUP.md)
-- [GOOGLE_OAUTH_INTEGRATION.md](./GOOGLE_OAUTH_INTEGRATION.md)
-- [QUICKSTART_OAUTH.md](./QUICKSTART_OAUTH.md)
+This project officially supports **Node.js 22.x** (as specified in [package.json](package.json)).
 
 ## Quickstart (local dev)
 
@@ -287,17 +278,6 @@ cp .env.example .env.local
 | Variable | Description | How to obtain |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | PostgreSQL connection string (with SSL) | Create a free database on [Neon](https://neon.tech) → **Connection Details** → copy the connection string. Append `?sslmode=require&schema=public` if not already present. |
-| `JWT_SECRET` | Secret used to sign custom JWT tokens | Generate with `openssl rand -base64 32` or any random string ≥ 32 characters. |
-| `GEMINI_API_KEY` | Google Gemini API key for AI features | Go to [Google AI Studio](https://aistudio.google.com/app/apikey) → **Create API key**. |
-
-### OAuth / NextAuth Variables
-
-| Variable | Description | How to obtain |
-| :--- | :--- | :--- |
-| `NEXTAUTH_URL` | Canonical base URL of your deployment | Set to `http://localhost:3000` in development. On Vercel, set to your deployment URL (e.g. `https://gitverse.vercel.app`). |
-| `NEXTAUTH_SECRET` | Secret used to sign NextAuth session tokens | Generate with `openssl rand -base64 32`. Must be a strong random string. |
-| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 client ID | [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services → Credentials → Create Credentials → OAuth client ID** (Web application). |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 client secret | Obtained alongside `GOOGLE_CLIENT_ID` in the same step above. |
 
 ### GitHub App Variables (for PR reviews)
 

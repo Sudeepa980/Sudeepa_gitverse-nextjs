@@ -124,6 +124,12 @@ async function runJob(
       maxAttempts: job.maxAttempts,
       retryAfter: retryAfter ?? undefined,
     });
+
+    const shouldRetry = job.attempts < job.maxAttempts;
+    if (!shouldRetry && job.type === "repository_analysis") {
+      await repositoryService.markRepositoryFailed(job.repositoryId, safeMessage);
+    }
+
     return false;
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -138,6 +144,8 @@ export interface AnalysisWorkerSummary {
   executionDurationMs: number;
   budgetUsedMs?: number;
   success: boolean;
+  budgetExhausted?: boolean;
+  earlyStopReason?: string;
 }
 
 export async function startAnalysisWorkerLoop(opts?: {
@@ -163,6 +171,11 @@ export async function startAnalysisWorkerLoop(opts?: {
   let jobsProcessed = 0;
   let jobsSkipped = 0;
   let jobsFailed = 0;
+  
+  const timeBudgetMs = opts?.timeBudgetMs;
+  const budgetGraceMs = opts?.budgetGraceMs ?? 10_000; // 10s default buffer
+  let budgetExhausted = false;
+  let earlyStopReason: string | undefined;
 
   const shutdown = async (signal: string) => {
     if (stopping) return;
@@ -181,6 +194,14 @@ export async function startAnalysisWorkerLoop(opts?: {
 
   while (!stopping && Date.now() < deadline) {
     try {
+      if (opts?.timeBudgetMs) {
+        const elapsed = Date.now() - startTime;
+        if (elapsed >= opts.timeBudgetMs) {
+          console.log(`Time budget of ${opts.timeBudgetMs}ms reached (elapsed: ${elapsed}ms). Processed ${jobsProcessed} jobs. Shutting down gracefully...`);
+          break;
+        }
+      }
+
       const job = await analysisJobService.claimNextJob({
         workerId,
         lockMs,
@@ -197,15 +218,13 @@ export async function startAnalysisWorkerLoop(opts?: {
       console.log(
         `claimed job ${job.id} (attempt ${job.attempts}/${job.maxAttempts})`
       );
-      const isSuccess = await runJob(job, { workerId, lockMs, heartbeatIntervalMs });
-      
-      if (isSuccess) {
-        jobsProcessed++;
-      } else {
-        jobsFailed++;
-      }
+      await runJob(job, { workerId, lockMs, heartbeatIntervalMs });
+      jobsProcessed++;
 
-      if (opts?.once) break;
+      if (opts?.once) {
+        console.log(`Finished one-shot run. Processed ${jobsProcessed} jobs.`);
+        return;
+      }
     } catch (e) {
       console.error("worker loop error:", sanitizeErrorMessage(e));
       if (opts?.once || opts?.timeBudgetMs) {
@@ -219,6 +238,8 @@ export async function startAnalysisWorkerLoop(opts?: {
             ? Date.now() - startTimeMs
             : undefined,
           success: false,
+          budgetExhausted,
+          earlyStopReason,
         };
       }
       await sleep(pollIntervalMs);
@@ -235,6 +256,8 @@ export async function startAnalysisWorkerLoop(opts?: {
       ? Date.now() - startTimeMs
       : undefined,
     success: true,
+    budgetExhausted,
+    earlyStopReason,
   };
 }
 

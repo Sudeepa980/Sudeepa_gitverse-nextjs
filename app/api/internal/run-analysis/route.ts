@@ -2,16 +2,16 @@ import { NextResponse } from 'next/server';
 import { startAnalysisWorkerLoop } from '../../../../scripts/analysisWorker';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // max Vercel function duration (if supported by plan)
+export const maxDuration = 300; // Allow maximum serverless execution time
 
 export async function GET(request: Request) {
-  // Simple auth check for internal cron
+  // Simple auth check for internal cron jobs
   const authHeader = request.headers.get('authorization');
   if (
     process.env.ANALYSIS_RUNNER_SECRET &&
     authHeader !== `Bearer ${process.env.ANALYSIS_RUNNER_SECRET}`
   ) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const url = new URL(request.url);

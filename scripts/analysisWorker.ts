@@ -3,11 +3,6 @@ import os from "os";
 import prisma from "../lib/prisma";
 import { analysisJobService } from "../lib/services/analysisJobService";
 import { repositoryService } from "../lib/services/repositoryService";
-import {
-  isRateLimitError,
-  extractRetryAfter,
-  sanitizeErrorMessage,
-} from "../lib/utils/rateLimit";
 import type { AnalysisJob } from "@prisma/client";
 
 const POLL_INTERVAL_MS = 2000;
@@ -32,7 +27,7 @@ async function runJob(
     lockMs: number;
     heartbeatIntervalMs: number;
   }
-): Promise<boolean> {
+) {
   let heartbeatTimer: NodeJS.Timeout | null = null;
   let lastProgressWriteAt = 0;
   let lastProgressPercent: number | undefined;
@@ -84,7 +79,7 @@ async function runJob(
           workerId: params.workerId,
           lockMs: params.lockMs,
         })
-        .catch((e) => console.error("heartbeat failed", sanitizeErrorMessage(e)));
+        .catch((e) => console.error("heartbeat failed", e));
     }, params.heartbeatIntervalMs);
 
     if (job.type !== "repository_analysis") {
@@ -101,56 +96,20 @@ async function runJob(
       jobId: job.id,
       workerId: params.workerId,
     });
-    return true;
   } catch (err: any) {
-    const rateLimited = isRateLimitError(err);
-    const retryAfter = rateLimited ? extractRetryAfter(err) : null;
-    const safeMessage = sanitizeErrorMessage(err);
-
-    if (rateLimited) {
-      console.error(
-        `Job ${job.id} rate limited (attempt ${job.attempts}/${job.maxAttempts})` +
-          (retryAfter ? `, retry after ${retryAfter}s` : "")
-      );
-    } else {
-      console.error(`Job ${job.id} failed: ${safeMessage}`);
-    }
+    const message = err?.message ? String(err.message) : String(err);
+    console.error(`Job ${job.id} failed:`, err);
 
     await analysisJobService.markFailed({
       jobId: job.id,
       workerId: params.workerId,
-      error: safeMessage,
+      error: message,
       attempts: job.attempts,
       maxAttempts: job.maxAttempts,
-      retryAfter: retryAfter ?? undefined,
     });
-
-    const shouldRetry = job.attempts < job.maxAttempts;
-    if (!shouldRetry && job.type === "repository_analysis") {
-      await repositoryService.markRepositoryFailed(job.repositoryId, safeMessage);
-    }
-
-    return false;
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
   }
-}
-
-export interface JobOutcome {
-  jobId: string;
-  status: "processed" | "failed";
-}
-
-export interface AnalysisWorkerSummary {
-  totalJobsScanned: number;
-  jobsProcessed: number;
-  jobsSkipped: number;
-  jobsFailed: number;
-  executionDurationMs: number;
-  jobOutcomes?: JobOutcome[];
-  success: boolean;
-  budgetExhausted?: boolean;
-  earlyStopReason?: string;
 }
 
 export async function startAnalysisWorkerLoop(opts?: {
@@ -159,7 +118,6 @@ export async function startAnalysisWorkerLoop(opts?: {
   heartbeatIntervalMs?: number;
   lockMs?: number;
   once?: boolean;
-  timeBudgetMs?: number;
 }) {
   const workerId = opts?.workerId || getWorkerId();
   const pollIntervalMs = opts?.pollIntervalMs ?? POLL_INTERVAL_MS;
@@ -170,12 +128,6 @@ export async function startAnalysisWorkerLoop(opts?: {
   console.log(`analysis worker starting: ${workerId}`);
 
   let stopping = false;
-  const startTimeMs = Date.now();
-  let totalJobsScanned = 0;
-  let jobsProcessed = 0;
-  let jobsSkipped = 0;
-  let jobsFailed = 0;
-  const jobOutcomes: JobOutcome[] = [];
 
   const shutdown = async (signal: string) => {
     if (stopping) return;
@@ -192,92 +144,31 @@ export async function startAnalysisWorkerLoop(opts?: {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
 
-  const startTime = Date.now();
-  let jobsProcessed = 0;
-  let jobsSkipped = 0;
-
   while (!stopping) {
-    if (timeBudgetMs) {
-      const elapsed = Date.now() - startTimeMs;
-      const remaining = timeBudgetMs - elapsed;
-      if (remaining <= budgetGraceMs) {
-        console.log(`Time budget nearly exhausted (${remaining}ms remaining). Stopping gracefully.`);
-        budgetExhausted = true;
-        earlyStopReason = "time_budget_exhausted";
-        break;
-      }
-    }
-
     try {
-      if (opts?.timeBudgetMs) {
-        const elapsed = Date.now() - startTime;
-        if (elapsed >= opts.timeBudgetMs) {
-          console.log(`Time budget of ${opts.timeBudgetMs}ms reached (elapsed: ${elapsed}ms). Processed ${jobsProcessed} jobs. Shutting down gracefully...`);
-          break;
-        }
-      }
-
       const job = await analysisJobService.claimNextJob({
         workerId,
         lockMs,
       });
 
       if (!job) {
-        jobsSkipped++;
-        if (opts?.once) {
-          console.log(`No jobs available. Processed ${jobsProcessed} jobs.`);
-          return;
-        }
+        if (opts?.once) return;
         await sleep(pollIntervalMs);
         continue;
       }
 
-      totalJobsScanned++;
       console.log(
         `claimed job ${job.id} (attempt ${job.attempts}/${job.maxAttempts})`
       );
-      const isSuccess = await runJob(job, { workerId, lockMs, heartbeatIntervalMs });
-      
-      if (isSuccess) {
-        jobsProcessed++;
-        jobOutcomes.push({ jobId: job.id, status: "processed" });
-      } else {
-        jobsFailed++;
-        jobOutcomes.push({ jobId: job.id, status: "failed" });
-      }
+      await runJob(job, { workerId, lockMs, heartbeatIntervalMs });
 
-      if (opts?.once) {
-        console.log(`Finished one-shot run. Processed ${jobsProcessed} jobs.`);
-        return;
-      }
+      if (opts?.once) return;
     } catch (e) {
-      console.error("worker loop error:", sanitizeErrorMessage(e));
-      if (opts?.once) {
-        return {
-          totalJobsScanned,
-          jobsProcessed,
-          jobsSkipped,
-          jobsFailed,
-          executionDurationMs: Date.now() - startTimeMs,
-          jobOutcomes,
-          success: false,
-          budgetExhausted,
-          earlyStopReason,
-        };
-      }
+      console.error("worker loop error:", e);
+      if (opts?.once) return;
       await sleep(pollIntervalMs);
     }
   }
-
-  return {
-    totalJobsScanned,
-    jobsProcessed,
-    jobsSkipped,
-    jobsFailed,
-    executionDurationMs: Date.now() - startTimeMs,
-    jobOutcomes,
-    success: jobsFailed === 0,
-  };
 }
 
 // Run as standalone script

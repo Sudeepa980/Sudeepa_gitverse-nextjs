@@ -346,7 +346,7 @@ export default function RepositoryAnalysis() {
     }
   };
 
-  // â”€â”€ Tab content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  
   const renderContent = () => {
     switch (activeTab) {
       case "overview":
@@ -414,7 +414,16 @@ const formattedLastAnalyzed =
         timeStyle: "short",
       }).format(lastAnalyzedDate)
     : "Not available";
-  return (
+
+const formatElapsed = (secs: number) => {
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+};
+
+const progressPercent = job?.progressPercent ?? 0;
+const progressMessage = job?.progressMessage || "Queued";
+
+return (
     <DashboardLayout>
       <div className="space-y-6">
         {showDeleteDialog && (

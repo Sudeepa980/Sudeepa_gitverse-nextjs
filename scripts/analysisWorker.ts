@@ -149,7 +149,7 @@ export interface AnalysisWorkerSummary {
   jobsFailed: number;
   jobsErrored: number;
   executionDurationMs: number;
-  budgetUsedMs?: number;
+  earlyStopReason?: string;
   success: boolean;
   jobOutcomes: JobOutcome[];
 }
@@ -160,7 +160,7 @@ export async function startAnalysisWorkerLoop(opts?: {
   heartbeatIntervalMs?: number;
   lockMs?: number;
   once?: boolean;
-  timeBudgetMs?: number;
+  maxJobs?: number;
 }): Promise<AnalysisWorkerSummary> {
   const workerId = opts?.workerId || getWorkerId();
   const pollIntervalMs = opts?.pollIntervalMs ?? POLL_INTERVAL_MS;
@@ -177,8 +177,7 @@ export async function startAnalysisWorkerLoop(opts?: {
   let jobsProcessed = 0;
   let jobsSkipped = 0;
   let jobsFailed = 0;
-  let jobsErrored = 0;
-  const jobOutcomes: JobOutcome[] = [];
+  let earlyStopReason: string | undefined;
 
   const shutdown = async (signal: string) => {
     if (stopping) return;
@@ -195,7 +194,17 @@ export async function startAnalysisWorkerLoop(opts?: {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
 
-  while (!stopping && Date.now() < deadline) {
+  const startTime = Date.now();
+  let jobsProcessed = 0;
+  let jobsSkipped = 0;
+
+  while (!stopping) {
+    if (opts?.maxJobs !== undefined && (jobsProcessed + jobsFailed) >= opts.maxJobs) {
+      console.log(`maxJobs limit of ${opts.maxJobs} reached, stopping loop.`);
+      earlyStopReason = "maxJobsReached";
+      break;
+    }
+
     try {
       if (opts?.timeBudgetMs) {
         const elapsed = Date.now() - startTime;
@@ -212,7 +221,10 @@ export async function startAnalysisWorkerLoop(opts?: {
 
       if (!job) {
         jobsSkipped++;
-        if (opts?.once || opts?.timeBudgetMs) break;
+        if (opts?.once || opts?.maxJobs !== undefined) {
+          earlyStopReason = earlyStopReason || "queueEmpty";
+          break;
+        }
         await sleep(pollIntervalMs);
         continue;
       }
@@ -232,12 +244,12 @@ export async function startAnalysisWorkerLoop(opts?: {
       }
 
       if (opts?.once) {
-        console.log(`Finished one-shot run. Processed ${jobsProcessed} jobs.`);
-        return;
+        earlyStopReason = earlyStopReason || "onceCompleted";
+        break;
       }
     } catch (e) {
       console.error("worker loop error:", sanitizeErrorMessage(e));
-      if (opts?.once || opts?.timeBudgetMs) {
+      if (opts?.once || opts?.maxJobs !== undefined) {
         return {
           totalJobsScanned,
           jobsProcessed,
@@ -245,9 +257,7 @@ export async function startAnalysisWorkerLoop(opts?: {
           jobsFailed,
           jobsErrored,
           executionDurationMs: Date.now() - startTimeMs,
-          budgetUsedMs: opts?.timeBudgetMs
-            ? Date.now() - startTimeMs
-            : undefined,
+          earlyStopReason: "errorOut",
           success: false,
           jobOutcomes,
         };
@@ -265,12 +275,8 @@ export async function startAnalysisWorkerLoop(opts?: {
     jobsFailed,
     jobsErrored,
     executionDurationMs: Date.now() - startTimeMs,
-    budgetUsedMs: opts?.timeBudgetMs
-      ? Date.now() - startTimeMs
-      : undefined,
-    success: true,
-    budgetExhausted,
     earlyStopReason,
+    success: true,
   };
 }
 

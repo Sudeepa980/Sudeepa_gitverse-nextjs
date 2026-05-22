@@ -71,9 +71,17 @@ const tabs: Tab[] = [
   { id: "overview", label: "Overview", icon: <Home className="h-4 w-4" /> },
   { id: "files", label: "Files", icon: <FolderTree className="h-4 w-4" /> },
   { id: "commits", label: "Commits", icon: <GitCommit className="h-4 w-4" /> },
-  { id: "contributors", label: "Contributors", icon: <Users className="h-4 w-4" /> },
+  {
+    id: "contributors",
+    label: "Contributors",
+    icon: <Users className="h-4 w-4" />,
+  },
   { id: "mentor", label: "AI Mentor", icon: <Sparkles className="h-4 w-4" /> },
-  { id: "insights", label: "Insights", icon: <BarChart3 className="h-4 w-4" /> },
+  {
+    id: "insights",
+    label: "Insights",
+    icon: <BarChart3 className="h-4 w-4" />,
+  },
 ];
 
 export default function RepositoryAnalysis() {
@@ -86,7 +94,7 @@ export default function RepositoryAnalysis() {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [repository, setRepository] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isAnalyzing, _setIsAnalyzing] = useState(false);
   const [job, setJob] = useState<any>(null);
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -111,7 +119,7 @@ export default function RepositoryAnalysis() {
       elapsedTimer.current = setInterval(() => {
         if (pollingStartedAt.current) {
           setElapsedSeconds(
-            Math.floor((Date.now() - pollingStartedAt.current) / 1000)
+            Math.floor((Date.now() - pollingStartedAt.current) / 1000),
           );
         }
       }, 1000);
@@ -172,8 +180,8 @@ export default function RepositoryAnalysis() {
         setIsAnalyzing(false);
         setAnalysisError(
           "Analysis has been queued for over 8 minutes without progress. " +
-          "The background worker may not be running. Please try again later " +
-          "or contact the maintainer."
+            "The background worker may not be running. Please try again later " +
+            "or contact the maintainer.",
         );
         return;
       }
@@ -182,7 +190,10 @@ export default function RepositoryAnalysis() {
       if (stopped) return;
 
       setTimeout(poll, intervalMs);
-      intervalMs = Math.min(POLL_INTERVAL_MAX_MS, intervalMs + POLL_INTERVAL_STEP_MS);
+      intervalMs = Math.min(
+        POLL_INTERVAL_MAX_MS,
+        intervalMs + POLL_INTERVAL_STEP_MS,
+      );
     };
 
     poll();
@@ -190,8 +201,14 @@ export default function RepositoryAnalysis() {
     return () => {
       stopped = true;
     };
-  // analysisTimedOut included so Check Again restarts polling
-  }, [repository?.status, repository?.latestJob?.id, job?.id, job?.status, analysisTimedOut]);
+    // analysisTimedOut included so Check Again restarts polling
+  }, [
+    repository?.status,
+    repository?.latestJob?.id,
+    job?.id,
+    job?.status,
+    analysisTimedOut,
+  ]);
 
   // =========================
   // FETCH REPOSITORY (FIXED)
@@ -239,7 +256,7 @@ export default function RepositoryAnalysis() {
 
       const response = await axios.get(
         buildApiUrl(`/api/analysis-jobs/${jobId}`),
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       const nextJob = response.data.job || response.data;
@@ -319,7 +336,8 @@ export default function RepositoryAnalysis() {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.response?.data?.error || "Failed to delete repository",
+        description:
+          error.response?.data?.error || "Failed to delete repository",
         variant: "destructive",
       });
     } finally {
@@ -385,6 +403,17 @@ const safeProgressMessage =
     : lastProgressMessageRef.current || "Analyzing repository...";
 
   // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const lastAnalyzedDate = repository?.lastAnalyzedAt
+  ? new Date(repository.lastAnalyzedAt)
+  : null;
+
+const formattedLastAnalyzed =
+  lastAnalyzedDate && !isNaN(lastAnalyzedDate.getTime())
+    ? new Intl.DateTimeFormat("en-US", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(lastAnalyzedDate)
+    : "Not available";
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -469,8 +498,23 @@ const safeProgressMessage =
                       <span className="animate-pulse">â—‰</span>
                       Analyzing...
                     </span>
+                <p className="text-xs text-muted-foreground">
+                Status:{" "}
+                <span className="capitalize">{repository.status}</span>
+                </p>
+
+                <p className="text-xs text-muted-foreground">
+                  Last analyzed:{" "}
+                  <span>{formattedLastAnalyzed}</span>
+                </p>
+
+                {isAnalyzing && (
+                <span className="flex items-center gap-1 text-xs text-primary">
+                <span className="animate-pulse">â—</span>
+                Analyzing...
+                </span>
                   )}
-                </div>
+              </div>
               </div>
               <button
                 onClick={() => setShowDeleteDialog(true)}
@@ -488,9 +532,12 @@ const safeProgressMessage =
                   <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold mb-2">Analyzing Repository</h2>
+                  <h2 className="text-xl font-semibold mb-2">
+                    Analyzing Repository
+                  </h2>
                   <p className="text-muted-foreground">
-                    We&apos;re analyzing structure, commits, contributors, and more.
+                    We&apos;re analyzing structure, commits, contributors, and
+                    more.
                   </p>
 
                   {/* Progress bar */}
@@ -539,7 +586,6 @@ const safeProgressMessage =
                   </div>
                 </div>
               </div>
-
             ) : analysisTimedOut || analysisError ? (
               /* â”€â”€ Timeout / error state â”€â”€ */
               <div className="glass rounded-lg p-12 text-center space-y-6">
@@ -550,7 +596,9 @@ const safeProgressMessage =
                 </div>
                 <div>
                   <h2 className="text-xl font-semibold mb-2 text-red-400">
-                    {analysisTimedOut ? "Analysis Timed Out" : "Analysis Failed"}
+                    {analysisTimedOut
+                      ? "Analysis Timed Out"
+                      : "Analysis Failed"}
                   </h2>
                   <p className="text-muted-foreground max-w-md mx-auto text-sm">
                     {analysisError}
@@ -626,12 +674,15 @@ const safeProgressMessage =
                   <Trash2 className="h-5 w-5 sm:h-6 sm:w-6 text-red-500" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-lg sm:text-xl font-bold mb-2">Delete Repository</h3>
+                  <h3 className="text-lg sm:text-xl font-bold mb-2">
+                    Delete Repository
+                  </h3>
                   <p className="text-xs sm:text-sm text-muted-foreground">
                     Are you sure you want to delete{" "}
                     <strong className="break-words">{repository?.name}</strong>?
                     This action cannot be undone and will permanently remove all
-                    repository data, including commits, contributors, and analysis results.
+                    repository data, including commits, contributors, and
+                    analysis results.
                   </p>
                 </div>
               </div>

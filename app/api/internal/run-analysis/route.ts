@@ -1,32 +1,39 @@
 import { NextResponse } from 'next/server';
 import { startAnalysisWorkerLoop } from '../../../../scripts/analysisWorker';
+import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
+function secureCompare(a: string | null, b: string | null): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
 export async function GET(request: Request) {
-  const requestStart = Date.now();
-
-  try {
-    // Auth check
-    const authHeader = request.headers.get('authorization');
-
-  const url = new URL(request.url);
-  const budgetParam = url.searchParams.get('timeBudgetMs');
-  const timeBudgetMs = budgetParam ? parseInt(budgetParam, 10) : 240_000;
-
-  if (Number.isNaN(timeBudgetMs) || timeBudgetMs < 10_000) {
-    return NextResponse.json(
-      { error: 'timeBudgetMs must be at least 10000ms' },
-      { status: 400 },
-    );
+  // Simple auth check for internal cron
+  const authHeader = request.headers.get('authorization');
+  if (
+    process.env.ANALYSIS_RUNNER_SECRET &&
+    authHeader !== `Bearer ${process.env.ANALYSIS_RUNNER_SECRET}`
+  ) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  console.log(`Starting analysis cron run (budget: ${timeBudgetMs}ms)...`);
+  const url = new URL(request.url);
+  const maxJobsParam = url.searchParams.get('maxJobs');
+  const parsedMaxJobs = maxJobsParam ? parseInt(maxJobsParam, 10) : undefined;
+  const maxJobs = parsedMaxJobs != null && !isNaN(parsedMaxJobs) && parsedMaxJobs > 0 
+    ? parsedMaxJobs 
+    : undefined;
+
+  console.log(`Starting analysis cron run... (maxJobs: ${maxJobs ?? 'default'})`);
 
   try {
-    const metrics = await startAnalysisWorkerLoop({
-      timeBudgetMs,
+    // Run the worker loop with maxJobs if provided, otherwise "once" mode
+    const metrics = await startAnalysisWorkerLoop({ 
+      once: maxJobs === undefined,
+      maxJobs
     });
 
     console.log(`Finished analysis cron run. Summary:`, metrics);

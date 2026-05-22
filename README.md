@@ -291,6 +291,7 @@ cp .env.example .env.local
 | `DATABASE_URL` | PostgreSQL connection string (with SSL) | Create a free database on [Neon](https://neon.tech) → **Connection Details** → copy the connection string. Append `?sslmode=require&schema=public` if not already present. |
 | `JWT_SECRET` | Secret used to sign custom JWT tokens | Generate with `openssl rand -base64 32` or any random string ≥ 32 characters. |
 | `GEMINI_API_KEY` | Google Gemini API key for AI features | Go to [Google AI Studio](https://aistudio.google.com/app/apikey) → **Create API key**. |
+| `ANALYSIS_RUNNER_SECRET` | Secret to authorize the internal cron job runner endpoint in production | Generate with `openssl rand -base64 32`. Must be passed via `Authorization: Bearer <SECRET>` for cron triggering. |
 
 ### OAuth / NextAuth Variables
 
@@ -389,6 +390,14 @@ On Vercel, add it under **Settings → Environment Variables**.
 2. Verify the key is active in [Google AI Studio](https://aistudio.google.com/app/apikey).
 3. Check that the Gemini API is enabled for your Google Cloud project.
 
+### Internal Analysis Runner returning `500` or `401`
+
+**Cause:** The `ANALYSIS_RUNNER_SECRET` environment variable is missing in production or an incorrect authorization header was provided.
+
+**Fix:**
+1. Generate a strong random string (e.g., `openssl rand -base64 32`) and set it as `ANALYSIS_RUNNER_SECRET` in your deployment dashboard (e.g. Vercel).
+2. Configure your cron provider (like Vercel Cron or GitHub Actions) to send an `Authorization: Bearer <YOUR_SECRET>` HTTP header when triggering the `/api/internal/run-analysis` endpoint. In local development, the runner will execute without the secret, but in production, the authorization header is strictly enforced via a timing-safe validation.
+
 ### Environment variables not picked up after editing `.env.local`
 
 **Fix:** Restart the development server — Next.js reads `.env.local` only at startup:
@@ -478,6 +487,106 @@ This project is licensed under the MIT License.
 - Google for Gemini AI
 - NeonDB for serverless PostgreSQL
 - All contributors and users of GitVerse
+
+## ❓ FAQ – Common Questions & Edge Cases
+> This section covers product behavior, limitations, and design decisions not included in troubleshooting.
+### 1. Can GitVerse analyze very large repositories?
+Yes, but performance depends on repo size.
+
+- Small repos → fast (seconds)
+- Medium repos → moderate (few seconds to a minute)
+- Large monorepos → slower due to:
+  - dependency graph building
+  - AI summarization
+  - full file traversal
+
+### 2. Does GitVerse store repository data?
+GitVerse may temporarily store:
+- repository structure
+- analysis results
+- AI-generated summaries
+
+This helps improve performance and reduce repeated computation. You can extend it to add long-term caching if needed.
+
+### 3. What happens if GitHub API rate limits are hit?
+If GitHub rate limits are reached:
+- repository fetch may fail
+- partial analysis may be returned
+
+Recommended improvements:
+- use GitHub App authentication for higher limits
+- add retry with exponential backoff
+- cache repository metadata
+
+### 4. Does GitVerse support GitLab or Bitbucket?
+Not currently.
+
+GitVerse is built for GitHub only, but it can be extended by abstracting `gitService.ts` into provider-based adapters.
+
+### 5. Is GitVerse real-time collaborative?
+No.
+
+Currently:
+- single-user analysis only
+- no shared sessions or live collaboration
+
+Future idea:
+- shared repo exploration rooms
+- collaborative AI chat per repository
+
+### 6. How accurate is AI-based architecture mapping?
+AI results are:
+- helpful for understanding structure
+- not guaranteed to reflect runtime behavior perfectly
+
+Accuracy depends on:
+- code quality
+- naming conventions
+- project structure clarity
+
+### 7. Can I customize graphs and visualizations?
+Yes.
+
+Modify:
+src/components/visualizations/
+
+You can customize:
+- dependency graphs
+- module maps
+- risk heatmaps
+- node layouts
+
+### 8. Is GitVerse suitable for production-level analysis?
+Yes, but mainly for:
+- onboarding developers
+- exploring unfamiliar codebases
+- hackathon or OSS contribution workflows
+
+It is not a replacement for full static analysis tools.
+
+### 9. Can I customize AI prompts?
+Yes.
+
+Edit:
+lib/services/geminiService.ts
+
+You can change:
+- architecture explanation style
+- onboarding prompts
+- risk detection logic
+- suggestion formats
+
+### 10. What makes GitVerse different from GitHub UI?
+GitHub shows files.
+
+GitVerse shows understanding:
+- architecture map
+- dependency flow
+- hotspots & risks
+- AI onboarding assistant
+
+It turns a repo into a **learning system, not just a file browser**.
+
 
 
 

@@ -29,6 +29,8 @@ export const Skeleton: React.FC<SkeletonProps> = ({
     width: typeof width === 'number' ? `${width}px` : width,
     height: typeof height === 'number' ? `${height}px` : height,
   }
+  import React from 'react'
+import { cn } from "@/lib/utils";
 
   return (
     <span

@@ -123,7 +123,7 @@ export default function RepositoryAnalysis() {
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  
 
   // âœ… ERROR STATE (improved usage)
   const [error, setError] = useState<string | null>(null);

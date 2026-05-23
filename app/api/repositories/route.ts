@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isHttpError, requireAuth } from "@/lib/middleware";
+import { isHttpError, requireAuth , sanitizeError } from "@/lib/middleware";
 import { repositoryService } from "@/lib/services/repositoryService";
 import { analysisJobService } from "@/lib/services/analysisJobService";
+import { triggerAnalysisWorkerWorkflow } from "@/lib/services/analysisWorkerTriggerService";
 
 function normalizeKnownRepoHttpUrl(input: string): string | null {
   let parsed: URL;
@@ -36,6 +37,14 @@ function kickLocalRunner(request: NextRequest) {
     headers: secret ? { "x-analysis-runner-secret": secret } : undefined,
   }).catch(() => {
     // Best-effort only.
+  });
+}
+
+function kickProductionWorker() {
+  if (process.env.NODE_ENV !== "production") return;
+
+  void triggerAnalysisWorkerWorkflow().catch((error) => {
+    console.error("Failed to dispatch analysis worker workflow:", sanitizeError(error));
   });
 }
 
@@ -84,13 +93,14 @@ export async function POST(request: NextRequest) {
     });
 
     kickLocalRunner(request);
+    kickProductionWorker();
 
     return NextResponse.json(
       { repository, jobId: job.id, jobStatus: job.status },
       { status: 201 }
     );
   } catch (error: any) {
-    console.error("Create repository error:", error);
+    console.error("Create repository error:", sanitizeError(error));
     console.error("Error stack:", error.stack);
     if (isHttpError(error)) {
       return NextResponse.json(
@@ -112,7 +122,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ repositories });
   } catch (error: any) {
-    console.error("List repositories error:", error);
+    console.error("List repositories error:", sanitizeError(error));
     if (isHttpError(error)) {
       return NextResponse.json(
         { error: error.message },

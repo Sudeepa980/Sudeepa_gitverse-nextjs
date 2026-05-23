@@ -229,7 +229,39 @@ export class RepositoryService {
         progressPercent: 15,
         progressMessage: "Analyzing branches",
       });
-      const defaultBranch = branches.find((b) => b.isDefault)?.name || "main";
+      // Try to get default branch from GitHub API first, fallback to git detection
+let defaultBranch = branches.find((b) => b.isDefault)?.name || "main";
+
+// Extract owner/repo from URL for GitHub API call
+const githubMatch = repository.url.match(
+  /github\.com[/:]([^/]+)\/([^/.\s]+?)(?:\.git)?(?:[/?#].*)?$/i
+);
+if (githubMatch) {
+  try {
+    const [, owner, repo] = githubMatch;
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+    if (process.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `Bearer ${process.env.GITHUB_TOKEN}`;
+    }
+    const controller = new AbortController();
+const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+const res = await fetch(apiUrl, { headers, signal: controller.signal });
+clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.default_branch) {
+        defaultBranch = data.default_branch;
+        console.log(`[defaultBranch] GitHub API: ${defaultBranch}`);
+      }
+    }
+  } catch (err) {
+    console.warn("[defaultBranch] GitHub API failed, using git detection:", err);
+  }
+}
 
       await prisma.branch.createMany({
         data: branches.map((branch) => ({
@@ -376,7 +408,41 @@ export class RepositoryService {
       // Analyze files
       console.log(`Analyzing file tree for repository ${repositoryId}`);
       await report({ progressPercent: 65, progressMessage: "Scanning files" });
-      const files = await gitService.getFileTree();
+      const allFiles = await gitService.getFileTree();
+
+/**
+ * Directories to ignore during file tree scan.
+ * Keep this list minimal — only generated/noisy folders that add no analysis value.
+ */
+const IGNORED_DIRS = new Set([
+  "node_modules",
+  ".next",
+  ".nuxt",
+  "dist",
+  "build",
+  "out",
+  ".git",
+  "coverage",
+  ".turbo",
+  ".cache",
+  "__pycache__",
+  ".pytest_cache",
+  "venv",
+  ".venv",
+  "vendor",
+  "target",        // Rust/Java build output
+  ".gradle",
+  ".mvn",
+]);
+
+const files = allFiles.filter((file) => {
+  const parts = file.path.split(/[\\/]/);
+  return !parts.some((part) => IGNORED_DIRS.has(part));
+});
+
+console.log(
+  `File scan: ${allFiles.length} total, ${files.length} after ignoring build/generated folders`
+);
 
       // Avoid querying existing file paths (can be huge). Just rely on
       // `skipDuplicates` with the unique constraint (repositoryId, path).

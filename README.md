@@ -216,6 +216,35 @@ const loadMore = async () => {
 3. Add environment variables in Vercel dashboard
 4. Deploy!
 
+#### ✅ Vercel Environment Variables Checklist
+
+Add these in **Vercel Dashboard → Settings → Environment Variables**:
+
+| Variable | Required | When needed |
+|---|---|---|
+| `DATABASE_URL` | ✅ Always | PostgreSQL connection string (use NeonDB pooler URL) |
+| `NEXTAUTH_SECRET` | ✅ Always | Session encryption — generate with `openssl rand -base64 32` |
+| `NEXTAUTH_URL` | ✅ Always | Your production domain e.g. `https://your-app.vercel.app` |
+| `GEMINI_API_KEY` | ✅ Always | Google Gemini AI — get from [aistudio.google.com](https://aistudio.google.com) |
+| `JWT_SECRET` | ✅ Always | JWT signing secret |
+| `GOOGLE_CLIENT_ID` | ⚡ OAuth | Only if using Google login |
+| `GOOGLE_CLIENT_SECRET` | ⚡ OAuth | Only if using Google login |
+| `GITHUB_APP_ID` | ⚡ PR Reviews | Only if using GitHub App integration |
+| `GITHUB_APP_PRIVATE_KEY` | ⚡ PR Reviews | Only if using GitHub App integration |
+| `GITHUB_WEBHOOK_SECRET` | ⚡ PR Reviews | Only if using GitHub webhooks |
+| `ANALYSIS_RUNNER_SECRET` | ⚡ Cron | Required for scheduled analysis jobs on Vercel |
+| `GITVERSE_ANALYSIS_BACKEND` | ⚡ Cron | URL of your analysis worker backend |
+| `SMTP_HOST` | ⚡ Email | Only if using password reset emails |
+| `SMTP_USER` | ⚡ Email | Only if using password reset emails |
+| `SMTP_PASS` | ⚡ Email | Only if using password reset emails |
+
+#### ⚠️ Common Vercel Deployment Mistakes
+
+- **Wrong DATABASE_URL** — Use the **pooler** URL from NeonDB for Vercel (not direct connection)
+- **Missing NEXTAUTH_URL** — Must be set to your exact production domain
+- **GITHUB_APP_PRIVATE_KEY format** — Paste with literal `\n` between lines, wrapped in quotes
+- **ANALYSIS_RUNNER_SECRET not set** — Recommended for security; without it, the cron endpoint runs unauthenticated on Vercel
+
 ### Docker
 
 ```bash
@@ -253,23 +282,26 @@ firebase deploy
 
 ## 📝 Environment Variables
 
-Required:
+> 💡 For a full Vercel deployment checklist, see the [Vercel Deployment section](#-deployment) above.
 
-- `DATABASE_URL` - PostgreSQL connection string
-- `JWT_SECRET` - JWT secret key
-- `GEMINI_API_KEY` - Google Gemini API key
-
-OAuth (Google / NextAuth):
-
-- `NEXTAUTH_URL` - Deployed base URL (e.g. `https://<your-domain>`)
-- `NEXTAUTH_SECRET` - Session/JWT signing secret (generate with `openssl rand -base64 32`)
-- `GOOGLE_CLIENT_ID` - Google OAuth client id
-- `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
-
-Optional:
-
-- `NEXT_PUBLIC_API_URL` - API URL for client-side (defaults to current domain)
-
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ Always | PostgreSQL connection string (use NeonDB pooler URL for Vercel) |
+| `JWT_SECRET` | ✅ Always | JWT signing secret key |
+| `GEMINI_API_KEY` | ✅ Always | Google Gemini API key for AI features |
+| `NEXTAUTH_URL` | ✅ Always | Deployed base URL e.g. `https://<your-domain>` |
+| `NEXTAUTH_SECRET` | ✅ Always | Session/JWT signing secret (generate with `openssl rand -base64 32`) |
+| `GOOGLE_CLIENT_ID` | ⚡ OAuth | Google OAuth client id |
+| `GOOGLE_CLIENT_SECRET` | ⚡ OAuth | Google OAuth client secret |
+| `GITHUB_APP_ID` | ⚡ PR Reviews | GitHub App ID |
+| `GITHUB_APP_PRIVATE_KEY` | ⚡ PR Reviews | GitHub App private key (PEM format) |
+| `GITHUB_WEBHOOK_SECRET` | ⚡ PR Reviews | GitHub webhook secret |
+| `ANALYSIS_RUNNER_SECRET` | ⚡ Cron | Required for scheduled analysis jobs on Vercel |
+| `GITVERSE_ANALYSIS_BACKEND` | ⚡ Cron | URL of your analysis worker backend |
+| `SMTP_HOST` | ⚡ Email | SMTP server for password reset emails |
+| `SMTP_USER` | ⚡ Email | SMTP username |
+| `SMTP_PASS` | ⚡ Email | SMTP password / app password |
+| `NEXT_PUBLIC_API_URL` | Optional | API URL for client-side (defaults to current domain) |
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -293,3 +325,86 @@ This project is licensed under the MIT License.
 ---
 
 Made with ❤️ by the GitVerse Team
+---
+
+## 🚦 Troubleshooting
+
+### GitHub API Rate Limits
+
+#### What it looks like
+```text
+Error: API rate limit exceeded for user ID XXXXXX
+Status: 403 Forbidden
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1716825600
+```text
+
+You may also see this in the GitVerse UI:
+```
+Failed to fetch repository data. GitHub API rate limit exceeded.
+Please wait before retrying or add a GitHub token.
+```
+#### Why it happens
+GitHub allows **5,000 requests/hour** for authenticated users and only **60 requests/hour** for unauthenticated requests. Large repositories with many commits, files, or branches can hit this limit quickly during analysis.
+
+#### Fixes
+
+**1. Add a GitHub Personal Access Token**
+```bash
+# In your .env.local
+GITHUB_TOKEN=ghp_your_personal_access_token_here
+```
+Generate one at: [github.com/settings/tokens](https://github.com/settings/tokens)  
+Required scopes: `repo`, `read:user`
+
+**2. Check your current rate limit**
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" https://api.github.com/rate_limit
+```
+
+**3. Wait for reset**
+Rate limits reset every hour. Check the `X-RateLimit-Reset` header for the exact reset time (Unix timestamp).
+
+---
+
+### Environment Variables Reference
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string (NeonDB recommended) |
+| `JWT_SECRET` | ✅ | Secret key for JWT token signing |
+| `NEXTAUTH_SECRET` | ✅ | Secret for NextAuth.js session encryption |
+| `NEXTAUTH_URL` | ✅ | Your app's base URL (e.g. `http://localhost:3000`) |
+| `GEMINI_API_KEY` | ✅ | Google Gemini API key for AI features |
+| `GOOGLE_CLIENT_ID` | ⚡ OAuth | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | ⚡ OAuth | Google OAuth client secret |
+| `GITHUB_APP_ID` | ⚡ PR Reviews | GitHub App ID |
+| `GITHUB_APP_PRIVATE_KEY` | ⚡ PR Reviews | GitHub App private key (PEM format) |
+| `GITHUB_WEBHOOK_SECRET` | ⚡ PR Reviews | GitHub webhook secret |
+| `ANALYSIS_RUNNER_SECRET` | ⚡ Production | Secret for cron analysis endpoint |
+| `SMTP_HOST` | ⚡ Email | SMTP server host |
+| `SMTP_USER` | ⚡ Email | SMTP username |
+| `SMTP_PASS` | ⚡ Email | SMTP password / app password |
+
+---
+
+### Common Errors & Solutions
+
+| Error | Cause | Fix |
+|---|---|---|
+| `P1001: Can't reach database server` | Wrong DATABASE_URL or DB is paused | Check NeonDB dashboard, resume if suspended |
+| `401 Unauthorized` | Invalid or expired JWT | Re-login or regenerate JWT_SECRET |
+| `500 Failed to fetch repositories` | DB connection failed | Verify DATABASE_URL in .env.local |
+| `Analysis stuck at 0%` | Worker not running | Run `npm run dev` and check console |
+| `Gemini API error` | Invalid or missing API key | Check GEMINI_API_KEY in .env.local |
+
+---
+
+### Vercel Deployment Checklist
+
+- [ ] All required environment variables added in Vercel dashboard
+- [ ] `DATABASE_URL` uses **connection pooling** URL from NeonDB (not direct)
+- [ ] `NEXTAUTH_URL` set to your production domain
+- [ ] Google OAuth redirect URI updated to `https://<your-domain>/api/auth/callback/google`
+- [ ] `ANALYSIS_RUNNER_SECRET` set for cron job authentication
+- [ ] GitHub App webhook URL updated to `https://<your-domain>/api/webhooks/github`

@@ -1,9 +1,9 @@
 "use client";
 import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import Link from 'next/link'
 import { GitBranch, Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui'
-import { ThemeToggle } from './ThemeToggle'
 
 // Fix 1: Move navLinks outside the component to prevent dependency array issues
 const navLinks = [
@@ -93,7 +93,6 @@ export const Navbar: React.FC = () => {
 
           {/* CTA Buttons */}
           <div className="hidden md:flex items-center gap-3">
-            <ThemeToggle />
             <Button className="bg-gradient-primary hover:opacity-90 transition-opacity" asChild>
               <Link href="/login">Sign In</Link>
             </Button>

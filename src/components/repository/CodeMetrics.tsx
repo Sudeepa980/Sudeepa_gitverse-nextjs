@@ -76,7 +76,8 @@ export function CodeMetrics({ repository }: CodeMetricsProps) {
   const totalFiles = repository?.files?.length || 0;
   
   const sourceFilesList = repository?.files?.filter((f: any) =>
-    f.path?.match(/\.(ts|tsx|js|jsx|py|java|go|rs)$/i)
+    f.path?.match(/\.(ts|tsx|js|jsx|py|java|go|rs)$/i) &&
+    !f.path?.match(/\.(test|spec)\.(ts|tsx|js|jsx)$/i)
   ) || [];
   const sourceFiles = sourceFilesList.length;
 

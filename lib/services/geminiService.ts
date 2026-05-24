@@ -55,7 +55,7 @@ export class GeminiService {
   private model: GenerativeModel;
 
   constructor(apiKey?: string) {
-    const key = apiKey || process.env.GEMINI_API_KEY;
+    const key = (apiKey ?? process.env.GEMINI_API_KEY)?.trim();
     if (!key) {
       throw new GeminiServiceError(
         "Missing GEMINI_API_KEY environment variable",

@@ -5,6 +5,14 @@ import * as os from "os";
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
 
+function yieldIfHighMemory(threshold = 0.7): Promise<void> {
+  const usage = process.memoryUsage();
+  if (usage.heapUsed / usage.heapTotal > threshold) {
+    return new Promise((resolve) => setImmediate(resolve));
+  }
+  return Promise.resolve();
+}
+
 export interface AnalyzeRepositoryInput {
   name: string;
   url: string;
@@ -129,7 +137,6 @@ export class RepositoryService {
     });
 
     if (existingRepository) {
-      console.log(`Repository already exists: ${existingRepository.id}`);
 
       return existingRepository;
     }
@@ -190,20 +197,20 @@ export class RepositoryService {
 
     try {
       // Clone repository
-      console.log(`Cloning repository ${repository.url} to ${tempDir}`);
       await report({
         progressPercent: 5,
         progressMessage: "Cloning repository",
       });
-      gitService = await GitService.cloneRepository(repository.url, tempDir);
+      gitService = await GitService.cloneRepository(repository.url, tempDir, {
+        onProgress: (pct, msg) => {
+          const analysisPct = 5 + Math.round((pct / 100) * 3);
+          report({ progressPercent: Math.min(8, analysisPct), progressMessage: msg });
+        },
+      });
 
-      // Capture README / size / branches in parallel; these are independent once cloned.
+      // Capture README first, then size + branches in parallel.
       await report({ progressPercent: 8, progressMessage: "Reading README" });
-      const readmePromise = this.tryReadmeFromRepoPath(tempDir);
-      const sizePromise = gitService.getRepositorySize();
-      const branchesPromise = gitService.getBranches();
-
-      const readme = await readmePromise;
+      const readme = await this.tryReadmeFromRepoPath(tempDir);
       await prisma.repository.update({
         where: { id: repositoryId },
         data: {
@@ -219,49 +226,16 @@ export class RepositoryService {
         progressMessage: "Calculating size",
       });
       const [size, branches] = await Promise.all([
-        sizePromise,
-        branchesPromise,
+        gitService.getRepositorySize(),
+        gitService.getBranches(),
       ]);
 
       // Analyze branches
-      console.log(`Analyzing branches for repository ${repositoryId}`);
       await report({
         progressPercent: 15,
         progressMessage: "Analyzing branches",
       });
-      // Try to get default branch from GitHub API first, fallback to git detection
-let defaultBranch = branches.find((b) => b.isDefault)?.name || "main";
-
-// Extract owner/repo from URL for GitHub API call
-const githubMatch = repository.url.match(
-  /github\.com[/:]([^/]+)\/([^/.\s]+?)(?:\.git)?(?:[/?#].*)?$/i
-);
-if (githubMatch) {
-  try {
-    const [, owner, repo] = githubMatch;
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
-    const headers: Record<string, string> = {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    };
-    if (process.env.GITHUB_TOKEN) {
-      headers["Authorization"] = `Bearer ${process.env.GITHUB_TOKEN}`;
-    }
-    const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-const res = await fetch(apiUrl, { headers, signal: controller.signal });
-clearTimeout(timeoutId);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.default_branch) {
-        defaultBranch = data.default_branch;
-        console.log(`[defaultBranch] GitHub API: ${defaultBranch}`);
-      }
-    }
-  } catch (err) {
-    console.warn("[defaultBranch] GitHub API failed, using git detection:", err);
-  }
-}
+      const defaultBranch = branches.find((b) => b.isDefault)?.name || "main";
 
       await prisma.branch.createMany({
         data: branches.map((branch) => ({
@@ -276,13 +250,11 @@ clearTimeout(timeoutId);
       });
 
       // Analyze commits from all branches
-      console.log(`Analyzing commits for repository ${repositoryId}`);
       await report({
         progressPercent: 25,
         progressMessage: "Reading commit history",
       });
       const commits = await gitService.getCommits("--all", 1000);
-      console.log(`Total commits fetched from git: ${commits.length}`);
 
       // IMPORTANT: Do not load *all* existing commits for the repo.
       // On large repos this can be huge and cause OOM/timeouts. We only need to
@@ -306,9 +278,6 @@ clearTimeout(timeoutId);
         (commit: { hash: string }) => !existingHashes.has(commit.hash),
       );
 
-      console.log(
-        `Found ${commits.length} commits, ${newCommits.length} are new, ${existingCommits.length} already exist`,
-      );
 
       let insertedCount = 0;
       let failedCount = 0;
@@ -401,48 +370,14 @@ clearTimeout(timeoutId);
           failedCount += chunk.length;
           console.error(`Failed to insert commit chunk starting at ${i}:`, error.message);
         }
+
+        await yieldIfHighMemory();
       }
 
-      console.log(`Commit insertion complete: ${insertedCount} inserted, ${failedCount} failed`);
 
       // Analyze files
-      console.log(`Analyzing file tree for repository ${repositoryId}`);
       await report({ progressPercent: 65, progressMessage: "Scanning files" });
-      const allFiles = await gitService.getFileTree();
-
-/**
- * Directories to ignore during file tree scan.
- * Keep this list minimal — only generated/noisy folders that add no analysis value.
- */
-const IGNORED_DIRS = new Set([
-  "node_modules",
-  ".next",
-  ".nuxt",
-  "dist",
-  "build",
-  "out",
-  ".git",
-  "coverage",
-  ".turbo",
-  ".cache",
-  "__pycache__",
-  ".pytest_cache",
-  "venv",
-  ".venv",
-  "vendor",
-  "target",        // Rust/Java build output
-  ".gradle",
-  ".mvn",
-]);
-
-const files = allFiles.filter((file) => {
-  const parts = file.path.split(/[\\/]/);
-  return !parts.some((part) => IGNORED_DIRS.has(part));
-});
-
-console.log(
-  `File scan: ${allFiles.length} total, ${files.length} after ignoring build/generated folders`
-);
+      const files = await gitService.getFileTree();
 
       // Avoid querying existing file paths (can be huge). Just rely on
       // `skipDuplicates` with the unique constraint (repositoryId, path).
@@ -470,31 +405,23 @@ console.log(
             progressMessage: `Storing files (${insertedSoFar}/${files.length})`,
           });
         }
-        console.log(
-          `File scan complete: processed ${files.length} paths for repository ${repositoryId}`,
-        );
+       
       } else {
-        console.log(`No files found for repository ${repositoryId}`);
       }
 
       // Analyze contributors and languages in parallel; both are independent after file scan.
-      console.log(`Analyzing contributors for repository ${repositoryId}`);
       await report({
         progressPercent: 80,
         progressMessage: "Analyzing contributors",
       });
-      const contributorsPromise = gitService.getContributors();
-
-      console.log(`Detecting languages for repository ${repositoryId}`);
       await report({
         progressPercent: 90,
         progressMessage: "Detecting languages",
       });
-      const languagesPromise = gitService.detectLanguages();
 
       const [contributors, languages] = await Promise.all([
-        contributorsPromise,
-        languagesPromise,
+        gitService.getContributors(),
+        gitService.detectLanguages(),
       ]);
 
       const totalContributions = contributors.reduce(
@@ -592,7 +519,6 @@ console.log(
 
       await report({ progressPercent: 100, progressMessage: "Completed" });
 
-      console.log(`Repository ${repositoryId} analysis completed`);
     } catch (error: any) {
       console.error(`Error analyzing repository ${repositoryId}:`, error);
       await prisma.repository.update({

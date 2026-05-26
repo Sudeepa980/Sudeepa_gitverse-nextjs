@@ -1,9 +1,13 @@
 # 🎉 Migration Complete - Quick Reference
 
-## Your New Project Location
+## Project Location
 
-```
-📁 /home/time_walker/projects/projects/gitverse/gitverse-nextjs/
+📁 Navigate to the directory where you cloned the project
+
+Example:
+
+```bash
+/path/to/gitverse-nextjs
 ```
 
 ## Immediate Next Steps
@@ -11,7 +15,8 @@
 ### 1. Open in VS Code
 
 ```bash
-code /home/time_walker/projects/projects/gitverse/gitverse-nextjs
+cd gitverse-nextjs
+code .
 ```
 
 ### 2. Install Dependencies (if not already done)
@@ -235,7 +240,7 @@ git push origin main
 ## Need Help?
 
 1. Check the documentation files above
-2. Review the original project in `../gitverse/`
+2. Review the original project repository if needed
 3. Check Next.js docs: https://nextjs.org/docs
 4. Review Prisma docs: https://prisma.io/docs
 

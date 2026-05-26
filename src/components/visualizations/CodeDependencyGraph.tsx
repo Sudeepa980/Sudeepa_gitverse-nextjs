@@ -1,28 +1,20 @@
 import { useEffect, useRef } from "react";
 import * as d3 from "d3";
 import { Card } from "@/components/ui";
+import { GraphAnalyzer } from "@/utils/graphAnalyzer";
+import { MapControls } from "./MapControls";
 
-interface Node {
-  id: string;
-  name: string;
-  type: "folder" | "file";
-  size: number;
+interface RepositoryFile {
   path: string;
+  lines?: number;
 }
 
-interface Link {
-  source: string;
-  target: string;
-  strength: number;
-}
-
-interface GraphData {
-  nodes: Node[];
-  links: Link[];
+interface Repository {
+  files?: RepositoryFile[];
 }
 
 // Generate dependency graph from repository files
-const generateDependencyGraph = (repository: any): GraphData => {
+const generateDependencyGraph = (repository?: Repository): GraphData => {
   const nodes: Node[] = [];
   const links: Link[] = [];
 
@@ -31,7 +23,7 @@ const generateDependencyGraph = (repository: any): GraphData => {
   }
 
   // Extract unique folders and create nodes
-  const files = repository.files as any[];
+  const files = repository.files;
 
   // Create folder nodes
   const folderPaths = new Set<string>();
@@ -67,7 +59,7 @@ const generateDependencyGraph = (repository: any): GraphData => {
       id: `file-${file.path}`,
       name: fileName,
       type: "file",
-      size: Math.min(Math.max(file.lines / 10 || 50, 40), 150),
+      size: Math.min(Math.max((file.lines ?? 0) / 10 || 50, 40), 150),
       path: file.path,
     });
   });
@@ -100,21 +92,49 @@ const generateDependencyGraph = (repository: any): GraphData => {
     }
   });
 
-  return { nodes, links };
-};
 
 interface CodeDependencyGraphProps {
-  repository?: any;
+  repository?: Repository;
 }
 
 export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef<any>(null);
+  const svgSelectionRef = useRef<any>(null);
+  
+  const graphAnalyzer = new GraphAnalyzer();
+  const graphData = graphAnalyzer.buildDependencyGraph(repository?.files || []);
+
+  const handleZoomIn = () => {
+    if (svgSelectionRef.current && zoomRef.current) {
+      svgSelectionRef.current
+        .transition()
+        .duration(300)
+        .call(zoomRef.current.scaleBy, 1.3);
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (svgSelectionRef.current && zoomRef.current) {
+      svgSelectionRef.current
+        .transition()
+        .duration(300)
+        .call(zoomRef.current.scaleBy, 1 / 1.3);
+    }
+  };
+
+  const handleReset = () => {
+    if (svgSelectionRef.current && zoomRef.current) {
+      svgSelectionRef.current
+        .transition()
+        .duration(500)
+        .call(zoomRef.current.transform, d3.zoomIdentity);
+    }
+  };
 
   useEffect(() => {
     if (!svgRef.current) return;
-
-    const graphData = generateDependencyGraph(repository);
 
     // If no data, show empty state
     if (graphData.nodes.length === 0) {
@@ -180,8 +200,9 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", "rgba(255,255,255,0.2)")
+      .attr("stroke", (d: any) => d.isCyclic ? "#ef4444" : "rgba(255,255,255,0.2)")
       .attr("stroke-width", (d: any) => d.strength * 2)
+      .attr("stroke-dasharray", (d: any) => d.isCyclic ? "5,5" : "none")
       .attr("stroke-opacity", 0.6);
 
     // Draw nodes
@@ -203,8 +224,8 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
             d.fx = event.x;
             d.fy = event.y;
           })
-          .on("end", (event: any, d: any) => {
-            if (!event.active) simulation.alphaTarget(0);
+          .on("end", (_event: any, d: any) => {
+            if (!d.active) simulation.alphaTarget(0);
             d.fx = null;
             d.fy = null;
           })
@@ -278,7 +299,7 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
         link
           .transition()
           .duration(200)
-          .attr("stroke", "rgba(255,255,255,0.2)")
+          .attr("stroke", (l: any) => l.isCyclic ? "#ef4444" : "rgba(255,255,255,0.2)")
           .attr("stroke-opacity", 0.6);
 
         if (tooltipRef.current) {
@@ -320,6 +341,10 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
 
     svg.call(zoom as any);
 
+    // Save D3 zoom behavior and SVG selection for programmatic triggers
+    zoomRef.current = zoom;
+    svgSelectionRef.current = svg;
+
     // Animate nodes on load
     node
       .selectAll("circle")
@@ -335,7 +360,8 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
   }, [repository]);
 
   return (
-    <Card className="glass p-4 sm:p-6">
+    <div className="relative">
+    <Card className="glass p-4 sm:p-6 overflow-hidden">
       <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <h3 className="text-base sm:text-lg font-semibold">
@@ -345,14 +371,16 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
             Interactive visualization of file dependencies and relationships
           </p>
         </div>
-        <div className="flex flex-wrap gap-3 sm:gap-4 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-purple-500 flex-shrink-0" />
-            <span>Folders</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
-            <span>Files</span>
+        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4 text-xs">
+          <div className="flex gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-purple-500 flex-shrink-0" />
+              <span>Folders</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
+              <span>Files</span>
+            </div>
           </div>
         </div>
       </div>
@@ -360,7 +388,7 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
         <h3 className="text-base sm:text-lg font-semibold mb-4">
           Code Dependencies
         </h3>
-        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+        <div className="relative overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
           <svg
             ref={svgRef}
             width="100%"
@@ -370,7 +398,13 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
             viewBox="0 0 900 600"
             preserveAspectRatio="xMidYMid meet"
           />
+          <MapControls 
+            onZoomIn={handleZoomIn} 
+            onZoomOut={handleZoomOut} 
+            onReset={handleReset} 
+          />
         </div>
+
       </div>
       <p className="text-xs text-muted-foreground mt-2 px-4 sm:px-0">
         💡 Drag nodes to reposition • Scroll to zoom • Hover for details
@@ -395,5 +429,6 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
 />
 
     </Card>
+    </div>
   );
 }

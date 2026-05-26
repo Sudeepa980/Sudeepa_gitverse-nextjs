@@ -26,6 +26,7 @@ export interface AIAnalysisRequest {
     | "suggestions";
   context?: {
     files?: Array<{ path: string; content: string }>;
+    fileTree?: string;
     commits?: Array<{ message: string; author: string; date: string }>;
     languages?: Array<{ name: string; percentage: number }>;
     contributors?: Array<{ name: string; commits: number }>;
@@ -135,7 +136,10 @@ export class GeminiService {
   /**
    * Chat using a pre-built prompt (free-form)
    */
-  async chatRaw(prompt: string): Promise<string> {
+  async chatRaw(
+    prompt: string,
+    history?: Array<{ role: "user" | "assistant"; content: string }>
+  ): Promise<string> {
     if (!prompt?.trim()) {
       throw new GeminiServiceError("Prompt is required", "chatRaw");
     }
@@ -146,6 +150,30 @@ export class GeminiService {
       return response.text();
     } catch (error) {
       this.handleError("chatRaw", error);
+      if (history && history.length > 0) {
+        // Cap history to prevent context limit failures
+        const MAX_HISTORY_LENGTH = 10;
+        const recentHistory = history.slice(-MAX_HISTORY_LENGTH);
+
+        const contents = [
+          ...recentHistory.map((msg) => ({
+            role: msg.role === "assistant" ? "model" : "user",
+            parts: [{ text: msg.content }],
+          })),
+          { role: "user", parts: [{ text: prompt }] },
+        ];
+
+        const result = await this.model.generateContent({ contents });
+        const response = await result.response;
+        return response.text();
+      } else {
+        const result = await this.model.generateContent(prompt);
+        const response = await result.response;
+        return response.text();
+      }
+    } catch (error: any) {
+      console.error("Gemini raw chat error:", error);
+      throw new Error(`AI chat failed: ${error.message}`);
     }
   }
 
@@ -198,11 +226,16 @@ Repository Context:
 - Languages: ${context?.languages?.map((l) => `${l.name} (${l.percentage}%)`).join(", ") || "Unknown"}
 - Contributors: ${context?.contributors?.length || 0}
 - Recent commits: ${context?.commits?.length || 0}
+${context?.fileTree ? `\nFile Structure:\n${context.fileTree}\n` : ""}
 `;
+
+    const scopeNote = (context as any)?.targetDirectory
+      ? `\nImportant: Restrict your analysis to the target directory (${(context as any).targetDirectory}). Only reference files outside this directory if they are immediately required dependencies.\n`
+      : "";
 
     switch (type) {
       case "overview":
-        return `${baseContext}
+        return `${baseContext}${scopeNote}
 
 Provide a comprehensive overview of this repository including:
 1. Primary purpose and functionality
@@ -213,7 +246,7 @@ Provide a comprehensive overview of this repository including:
 Be concise but informative.`;
 
       case "code-quality":
-        return `${baseContext}
+        return `${baseContext}${scopeNote}
 
 Analyze the code quality of this repository:
 1. Code organization and structure
@@ -225,7 +258,7 @@ Analyze the code quality of this repository:
 Provide actionable insights.`;
 
       case "security":
-        return `${baseContext}
+        return `${baseContext}${scopeNote}
 
 Perform a security analysis:
 1. Potential security vulnerabilities
@@ -235,7 +268,7 @@ Perform a security analysis:
 5. Security best practices recommendations`;
 
       case "architecture":
-        return `${baseContext}
+        return `${baseContext}${scopeNote}
 
 Analyze the software architecture:
 1. Overall architecture pattern (MVC, microservices, etc.)
@@ -245,7 +278,7 @@ Analyze the software architecture:
 5. Architectural recommendations`;
 
       case "suggestions":
-        return `${baseContext}
+        return `${baseContext}${scopeNote}
 
 Provide improvement suggestions:
 1. Code refactoring opportunities
